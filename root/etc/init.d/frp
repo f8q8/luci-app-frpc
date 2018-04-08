@@ -114,20 +114,20 @@ frp_write_bool() {
 }
 
 frp_add_cru(){
-time=$1
-if [ ! -f "/etc/crontabs/root" ] || [ -z "$(cat /etc/crontabs/root | grep frp)" ]; then
-  sed -i '/frp/d' /etc/crontabs/root >/dev/null 2>&1
-  echo "*/$time * * * * /etc/init.d/frp restart" >> /etc/crontabs/root 
-fi
-crontab /etc/crontabs/root
-/etc/init.d/cron restart
+	time=$1
+	if [ ! -f "/etc/crontabs/root" ] || [ -z "$(cat /etc/crontabs/root | grep frp)" ]; then
+		sed -i '/frp/d' /etc/crontabs/root >/dev/null 2>&1
+		echo "*/$time * * * * /etc/init.d/frp restart" >> /etc/crontabs/root 
+	fi
+	crontab /etc/crontabs/root
+	/etc/init.d/cron restart
 }
 
 frp_del_cru(){
-if [ ! -f "/etc/crontabs/root" ] || [ -n "$(cat /etc/crontabs/root | grep frp)" ]; then
-  sed -i '/frp/d' /etc/crontabs/root >/dev/null 2>&1
-fi
-/etc/init.d/cron restart
+	if [ ! -f "/etc/crontabs/root" ] || [ -n "$(cat /etc/crontabs/root | grep frp)" ]; then
+		sed -i '/frp/d' /etc/crontabs/root >/dev/null 2>&1
+	fi
+	/etc/init.d/cron restart
 }
 
 routercpu(){
@@ -162,26 +162,46 @@ routercpu(){
 
 download_binary(){
 	stop
-	routercpu
+	version_g=$(uci get frp.common.version_g)
+	version_d=$(uci get frp.common.version_d)
+	dl_url=$(uci get frp.common.url)
+	
 	echo_date "开始下载frpc二进制文件..."
-	filever=$ver
-	tarfile=frp_"$filever"_linux_"$ARCH".tar.gz
+	routercpu
 	
-	[ "$ARCH" = "mipsle" ] && wget  --timeout=10 --tries=10 -o $LOGFILE http://www.cn2qq.com/opt-file/frpc  -O $bin_path && ln -s $bin_path  /usr/bin/frpc && chmod +x $bin_path && echo_date "成功下载frpc二进制文件mipsle"
+	cd /var #&& mkdir -p /var/frpc
+	if [ $dl_url = "git" ]; then
+#		latest_url=`curl -k https://github.com/fatedier/frp/releases/latest|awk -F "[\"]" '{print $2}'`
+#		file_url=`curl -k $latest_url |grep  "$ARCH".tar.gz |awk -F "[\"]" '{print $2}' |head -n 1`
+		version="$version_g"
+		down_url=https://github.com/fatedier/frp/releases/download/v"$version"/frp_"$version"_linux_"$ARCH".tar.gz
+	else 
+		version="$version_d"
+		down_url=https://www.myopenwrt.org/wp-content/uploads/2018/01/frp_"$version"_linux_"$ARCH".tar.gz
+	fi
+	local a = 0
+	while [ ! -f /var/frp_"$version"_linux_"$ARCH".tar.gz ];
+	do
+		[ $a = 5 ] && exit
+		/usr/bin/wget -T10 $down_url
+		sleep 2
+		let " a = a + 1 "
+	done
 	
-	[ "$ver" != "$($bin_path -v)" ] && [ ! -f "$bin_path" ] && wget --no-check-certificate --timeout=10 --tries=10 -o $LOGFILE https://www.myopenwrt.org/wp-content/uploads/2018/01/frp_"$filever"_linux_$ARCH.tar.gz -O /tmp/$tarfile && echo_date "成功下载frpc二进制文件."
-
-	[ ! -s "/tmp/$tarfile" ] && [ ! -f "$bin_path" ] && wget --no-check-certificate --timeout=10 --tries=10 -o $LOGFILE https://github.com/fatedier/frp/releases/download/v$filever/$tarfile -O /tmp/$tarfile && echo_date "成功下载frpc二进制文件..."
+	killall -9 pidof openssl
 	
-	[ -f /tmp/$tarfile ] && tar zxvf /tmp/$tarfile -C /tmp && \
-	mv /tmp/frp_"$filever"_linux_$ARCH/frpc  $bin_path
-	[ -f "$bin_path" ] && ln -s $bin_path /usr/bin/frpc
-
-	if [ -L /usr/bin/frpc ]; then
-		chmod +x $bin_path && [ -x "$bin_path" ] && echo_date "frpc 下载完成"
-	rm -rf /tmp/frp_"$filever"_linux_"$ARCH"*
+	tar -zxvf frp_"$version"_linux_"$ARCH".tar.gz
+	mv /var/frp_"$version"_linux_"$ARCH"/ /var/frpc/
+	rm -rf /var/frpc/frp_"$version"_linux_"$ARCH"
+	[ -h "/usr/bin/frpc" ] && rm /usr/bin/frpc
+	ln -s /var/frpc/frpc /usr/bin/frpc
+	rm -rf frp_"$version"_linux_"$ARCH"*
+	
+	if [ -h "/usr/bin/frpc" ] ;
+	then
+		chmod +x /usr/bin/frpc && echo echo_date "成功下载frpc二进制文件"
 	else
-		echo_date "下载frpc$ver版二进制文件失败，请重试！"
+		echo_date "下载frpc二进制文件失败，请重试！"	
 	fi
 }
 
@@ -210,38 +230,32 @@ start() {
 	config_get http_proxy common http_proxy
 	config_get protocol common protocol
 	config_get time common time
-	config_get ver common ver
-	config_get bin_path common bin_path
 
 	mkdir -p /var/etc/frp
 	[ ! -f "$LOGFILE" ] && touch $LOGFILE
 
-	if [ -f "$bin_path" ] ;then
-	chmod +x $bin_path  && echo_date "frpc 正常" && ln -s $bin_path /usr/bin/frpc
-	else
-	[ "$ver" != "$(/usr/bin/frpc -v)" ] && [ ! -f $bin_path ] && rm -rf /usr/bin/frpc
-	fi
-
-	[ ! -f "/usr/bin/frpc" ] && download_binary
-	[ ! -f "/usr/bin/frpc" ] && logger -t Frp '下载frpc二进制文件失败，请重试' && exit 0
-
-	local tmpconf="/var/etc/frp/frpc.conf"
-
-	echo "[common]" >$tmpconf
-	echo "server_addr=${server_addr}" >>$tmpconf
-	echo "server_port=${server_port}" >>$tmpconf
-	echo "privilege_token=${privilege_token}" >>$tmpconf
-	echo "log_level=${log_level}" >>$tmpconf
-	echo "log_max_days=${log_max_days}" >>$tmpconf
-	echo "protocol=${protocol}" >>$tmpconf
-	echo "log_file=$LOGFILE" >>$tmpconf
-	[ -n "$http_proxy" ] && echo "http_proxy=$http_proxy" >>$tmpconf
-	[ -n "$pool_count" ] && echo "pool_count=$pool_count" >>$tmpconf
-
+	[ -h "/usr/bin/frpc" ] && [ ! -f "/var/frpc/frpc" ] && rm /usr/bin/frpc
+	[ ! -h "/usr/bin/frpc" ] && [ ! -f "/usr/bin/frpc" ] && download_binary
+	[ ! -h "/usr/bin/frpc" ] && [ !- f "/usr/bin/frpc" ] && logger -t Frp 'Download frpc failed, please retry.' && exit 0
+	
+	local tmpconf = "/var/etc/frp/frpc.conf"
+	
+	echo "[common]" > $tmpconf
+	echo "server_addr=${server_addr}" >> $tmpconf
+	echo "server_port=${server_port}" >> $tmpconf
+	echo "privilege_token=${privilege_token}" >> $tmpconf
+	echo "log_level=${log_level}" >> $tmpconf
+	echo "log_max_days=${log_max_days}" >> $tmpconf
+	echo "protocol=${protocol}" >> $tmpconf
+	echo "log_file=$LOGFILE" >> $tmpconf
+	[ -n "$http_proxy" ] && echo "http_proxy=${http_proxy}" >> $tmpconf
+	[ -n "$pool_count" ] && echo "pool_count=${pool_count}" >> $tmpconf
+	
 	config_load "frp"
 	frp_write_bool tcp_mux common 1
 	frp_write_bool login_fail_exit common 1
 	config_foreach conf_proxy_add proxy "$tmpconf"
+	
 
 	[ "$(cat "$tmpconf" | grep -c "type=")" -gt 0 ] || (echo_date "frp服务启动失败，请首先添加服务列表！" && exit 0)
 	logger -t FRPC 'Starting frp service'
@@ -261,6 +275,8 @@ stop() {
 		service_stop /usr/bin/frpc
 		Reduce_Log $LOGFILE
 	fi
+	enable=$(uci get frp.common.enabled)
+	[ $enable = "0" ] && rm -rf /tmp/frpc/
 	return 0
 }
 

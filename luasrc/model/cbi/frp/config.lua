@@ -49,20 +49,16 @@ e.default = "0"
 e:depends("type","tcp")
 e = t:taboption("base",Value, "local_ip", translate("Local Host Address"))
 luci.sys.net.ipv4_hints(function(x,d)
-e.default = "127.0.0.1"
-e:value("127.0.0.1")
 e:value(x,"%s (%s)"%{x,d})
 end)
 e.datatype = "ip4addr"
 e:depends("type","udp")
-e:depends("type","tcp")
 e:depends("type","http")
 e:depends("type","https")
 e:depends("enable_plugin",0)
 e = t:taboption("base",Value, "local_port", translate("Local Host Port"))
 e.datatype = "port"
 e:depends("type","udp")
-e:depends("type","tcp")
 e:depends("type","http")
 e:depends("type","https")
 e:depends("enable_plugin",0)
